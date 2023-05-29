@@ -20,7 +20,7 @@
 
 // new structs to represent message slot and message channel
 typedef struct channel{
-    unsigned int channel_id;
+    unsigned long channel_id;
     int message_len;
     char the_message[BUF_LEN];
     struct channel *next_channel;
