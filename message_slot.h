@@ -15,7 +15,6 @@
 
 #define DEVICE_NAME "char_dev"
 #define BUF_LEN 128
-#define DEVICE_FILE_NAME "simple_char_dev"
 #define SUCCESS 0
 
 // new structs to represent message slot and message channel
