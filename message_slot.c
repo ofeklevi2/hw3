@@ -22,20 +22,58 @@ MODULE_LICENSE("GPL");
 static channelsList message_slots_array[257]; // each minor number <= 256
 
 //================= HELP FUNCTIONS ================
-channel find_channel(unsigned long channel_id, channelList *this_channelList){
-    channel *channel = this_channelList->head;
-    while (channel != NULL){
-        if (channel->channel_id == channel_id){
-            return channel;
+channel create_new_channel(unsigned long channel_id, channelList *this_channelList){
+    channel *this_channel = kmalloc(sizeof(channel), GFP_KERNEL);
+    if (this_channel == NULL){
+        return NULL;
+    }
+    this_channel->channel_id = channel_id;
+    this_channel->message_len = 0;
+    this_channelList->len += 1;
+    return this_channel;
+}
+
+channel get_channel_write(unsigned long channel_id, channelList *this_channelList){
+    channel *this_channel = this_channelList->head;
+    if (this_channel == NULL){ //if channelList is empty, create its head with the proper channel_id and return it 
+        this_channelList->head = create_new_channel(channel_id, this_channelList);
+        this_channel = this_channelList->head;
+        if (this_channel == NULL){
+            return NULL;
         }
-        channel = channel->next_channel;
+        return this_channel;
+    }
+
+    while (this_channel != NULL){
+        if (this_channel->channel_id == channel_id){
+            return this_channel;
+        }
+        if (this_channel->next_channel != NULL){
+            this_channel = this_channel->next_channel;
+        }
+        
+    }
+    // if we got to this part, it means we got to the last channel, and our doesnt exist, lets create one
+    this_channel->next_channel = create_new_channel(channel_id, this_channelList);
+    this_channel = this_channel->next_channel;
+    if (this_channel == NULL){
+        return NULL:
+    }
+    return this_channel;
+}
+
+channel get_channel_read(unsigned long channel_id, channelList *this_channelList){
+    channel *this_channel = this_channelList->head;
+    while (this_channel != NULL){
+        if (this_channel->channel_id == channel_id){
+            return this_channel;
+        }
+        this_channel = channel->next_channel;
     }
     return NULL; // if we got to this part, it means channel == NULL
 }
 
-void get_or_create_id_channel(int minor, int channel_id){
 
-}
 
 //================= DEVICE FUNCTIONS ================
 // 1. In device_open(), the module will check if it has already created a channelList
@@ -51,7 +89,7 @@ static int device_open(struct inode *inode, struct file *file){
     if (message_slots_array[minor_number] == NULL){
         message_slots_array[minor_number] = kmalloc(sizeof(channelsList), GFP_KERNEL);
         if (message_slots_array[minor_number] == NULL){
-            printk("allocate memory error\n");
+            printk("kmalloc error\n");
             return -ENOMEM;
         }
         message_slots_array[minor_number]->head = NULL;
@@ -89,7 +127,7 @@ static ssize_t device_read( struct file* file,
                             size_t       length,
                             loff_t*      offset ){
 
-    int minor_num, i;
+    int minor_num, i, j;
     unsigned long channel_id;
     channel *this_channel;
     channelsList *this_channelList;
@@ -100,7 +138,7 @@ static ssize_t device_read( struct file* file,
     }
     channel_id = (file->private_data);
     this_channelList = message_slots_array[minor_num];
-    this_channel = find_channel(channel_id);
+    this_channel = get_channel_read(channel_id, this_channelList);
     if (this_channel == NULL){
         printk("channel not found\n");
         return -EINVAL;
@@ -112,9 +150,16 @@ static ssize_t device_read( struct file* file,
         printk("user buffer to small\n");
         return -ENOSPC;
     }
+    if (buffer == NULL){
+        printk("user buffer is NULL");
+        return -EINVAL;
+    }
     for (i = 0; i < length; i++){
         if ((put_user(this_channel->the_message[i], &buffer[i]) != 0)){
              printk("put_user error, can't read from this address\n");
+             for (j = 0; j < i; j++){
+                buffer[j] = '';
+             }
              return -EFAULT;
         }   
     }
@@ -129,8 +174,52 @@ static ssize_t device_write( struct file*       file,
                              size_t             length,
                              loff_t*            offset){
     
+    int minor_num, i, j;
+    unsigned long channel_id;
+    channel *this_channel;
+    channelsList *this_channelList; 
+    char tmp_buff[BUF_LEN];
+    minor_num = iminor(file->f_inode);
+    if (file->private_data == NULL){
+        printk("no channel_id");
+        return -EINVAL;
+    }
+    if (length <= 0 || length > 128){
+        printk("wrong message length\n");
+        return -EMSGSIZE;
+    } 
+    channel_id = (file->private_data);
+    this_channelList = message_slots_array[minor_num];
+    this_channel = get_channel_write(channel_id, this_channelList);
+    if (this_channel == NULL){
+        printk("kmalloc error");
+        return -EINVAL;
+    }
+    if (buffer == NULL){
+        printk("user buffer is NULL");
+        return -EINVAL;
+    }
+    //dont forget to update this_channel->message_len and this_channel->the_message
+    for (i = 0; i < length; i++){
+        if ((get_user(tmp_buff[i], &buffer[i]) != 0)){
+            printk("get_user error, can't write to this address\n");
+            return -EFAULT;
+        }
+    }
 
+    this_channel->message_len = i;
+    for (j = 0; j < i; j++){
+        this_channel->the_message[j] = tmp_buff[j];
+    }
+    //delete leftovers characters;
+    for (j = i; j < BUF_LEN; j++){
+        this_channel->the_message[j] = '';
+    }
+
+    printk("number of bytes written = %d", i);
+    return i;
 }
+
 
 
 
@@ -148,5 +237,35 @@ struct file_operations Fops = {
   .release        = device_release,
 };
 
+// Initialize the module - Register the character device                                   
+static int __init simple_init(void){
+  int rc = -1;
 
+  // Register driver capabilities. Obtain major num                                        
+  rc = register_chrdev( MAJOR_NUM, DEVICE_NAME, &Fops );
+
+  // Negative values signify an error                                                      
+  if( rc < 0 ) {
+    printk( KERN_ALERT "%s registraion failed for  %d\n",DEVICE_NAME, MAJOR_NUM );
+    return rc;
+  }
+   printk( "Registeration is successful.\n");
+   return SUCCESS;
+}
+
+static void __exit simple_cleanup(void){
+    int i;
+    channel *curr, *next;
+    for (i = 0; i < 257; i++){
+        curr = message_slots_array[i];
+        while (curr != NULL){
+            next = curr->next_channel;
+            kfree(curr);
+            curr = next;
+        }
+    }
+     unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
+}
+module_init(simple_init);
+module_exit(simple_cleanup);
 
