@@ -211,10 +211,10 @@ static ssize_t device_write( struct file*       file,
     for (j = 0; j < i; j++){
         this_channel->the_message[j] = tmp_buff[j];
     }
-    //delete leftovers characters;
-    for (j = i; j < BUF_LEN; j++){
-        this_channel->the_message[j] = '';
-    }
+    // //delete leftovers characters;
+    // for (j = i; j < BUF_LEN; j++){
+    //     this_channel->the_message[j] = '';
+    // }
 
     printk("number of bytes written = %d", i);
     return i;
