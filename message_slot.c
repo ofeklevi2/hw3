@@ -5,13 +5,11 @@
 #undef MODULE
 #define MODULE
 
-
 #include <linux/kernel.h>   /* We're doing kernel work */
 #include <linux/module.h>   /* Specifically, a module */
 #include <linux/fs.h>       /* for register_chrdev */
 #include <linux/uaccess.h>  /* for get_user and put_user */
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
-#include <errno.h>
 #include <linux/slab.h>
 
 MODULE_LICENSE("GPL");
@@ -22,7 +20,7 @@ MODULE_LICENSE("GPL");
 static channelsList message_slots_array[257]; // each minor number <= 256
 
 //================= HELP FUNCTIONS ================
-channel create_new_channel(unsigned long channel_id, channelList *this_channelList){
+channel *create_new_channel(unsigned long channel_id, channelsList *this_channelList){
     channel *this_channel = kmalloc(sizeof(channel), GFP_KERNEL);
     if (this_channel == NULL){
         return NULL;
@@ -33,7 +31,7 @@ channel create_new_channel(unsigned long channel_id, channelList *this_channelLi
     return this_channel;
 }
 
-channel get_channel_write(unsigned long channel_id, channelList *this_channelList){
+channel *get_channel_write(unsigned long channel_id, channelsList *this_channelList){
     channel *this_channel = this_channelList->head;
     if (this_channel == NULL){ //if channelList is empty, create its head with the proper channel_id and return it 
         this_channelList->head = create_new_channel(channel_id, this_channelList);
@@ -57,18 +55,18 @@ channel get_channel_write(unsigned long channel_id, channelList *this_channelLis
     this_channel->next_channel = create_new_channel(channel_id, this_channelList);
     this_channel = this_channel->next_channel;
     if (this_channel == NULL){
-        return NULL:
+        return NULL;
     }
     return this_channel;
 }
 
-channel get_channel_read(unsigned long channel_id, channelList *this_channelList){
+channel *get_channel_read(unsigned long channel_id, channel *this_channelList){
     channel *this_channel = this_channelList->head;
     while (this_channel != NULL){
         if (this_channel->channel_id == channel_id){
             return this_channel;
         }
-        this_channel = channel->next_channel;
+        this_channel = this_channel->next_channel;
     }
     return NULL; // if we got to this part, it means channel == NULL
 }
@@ -239,25 +237,31 @@ struct file_operations Fops = {
 
 // Initialize the module - Register the character device                                   
 static int __init simple_init(void){
-  int rc = -1;
+    int i;
+    int rc = -1;
 
-  // Register driver capabilities. Obtain major num                                        
-  rc = register_chrdev( MAJOR_NUM, DEVICE_NAME, &Fops );
+    // Register driver capabilities. Obtain major num                                        
+    rc = register_chrdev( MAJOR_NUM, DEVICE_NAME, &Fops );
 
-  // Negative values signify an error                                                      
-  if( rc < 0 ) {
-    printk( KERN_ALERT "%s registraion failed for  %d\n",DEVICE_NAME, MAJOR_NUM );
-    return rc;
-  }
-   printk( "Registeration is successful.\n");
-   return SUCCESS;
+    // Negative values signify an error                                                      
+    if( rc < 0 ) {
+        printk( KERN_ALERT "%s registraion failed for  %d\n",DEVICE_NAME, MAJOR_NUM );
+        return rc;
+    }
+
+    // initialize all array cells to NULL instead of 0
+    for (i = 0; i < 257; i++){
+        message_slots_array[i].head = NULL;
+    }
+    printk( "Registeration is successful.\n");
+    return SUCCESS;
 }
 
 static void __exit simple_cleanup(void){
     int i;
     channel *curr, *next;
     for (i = 0; i < 257; i++){
-        curr = message_slots_array[i];
+        curr = message_slots_array[i].head;
         while (curr != NULL){
             next = curr->next_channel;
             kfree(curr);
